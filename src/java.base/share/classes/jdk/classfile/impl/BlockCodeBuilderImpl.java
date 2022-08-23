@@ -36,9 +36,10 @@ import java.util.Objects;
 /**
  * BlockCodeBuilder
  */
-public final class BlockCodeBuilderImpl
+public sealed class BlockCodeBuilderImpl
         extends NonterminalCodeBuilder
-        implements CodeBuilder.BlockCodeBuilder {
+        implements CodeBuilder.BlockCodeBuilder
+        permits CatchFinallyBuilderImpl.InlineFinallyBuilder {
     private final CodeBuilder parent;
     private final Label startLabel, endLabel, breakLabel;
     private boolean reachable = true;
@@ -73,6 +74,10 @@ public final class BlockCodeBuilderImpl
 
     public boolean isEmpty() {
         return !hasInstructions;
+    }
+
+    public CodeBuilder parent() {
+        return parent;
     }
 
     private int topLocal(CodeBuilder parent) {

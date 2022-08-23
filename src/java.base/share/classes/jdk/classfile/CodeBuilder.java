@@ -48,6 +48,7 @@ import jdk.classfile.constantpool.Utf8Entry;
 import jdk.classfile.impl.AbstractInstruction;
 import jdk.classfile.impl.BlockCodeBuilderImpl;
 import jdk.classfile.impl.BytecodeHelpers;
+import jdk.classfile.impl.CatchFinallyBuilderImpl;
 import jdk.classfile.impl.CatchBuilderImpl;
 import jdk.classfile.impl.ChainedCodeBuilder;
 import jdk.classfile.impl.LabelImpl;
@@ -354,6 +355,22 @@ public sealed interface CodeBuilder
         var catchBuilder = new CatchBuilderImpl(this, tryBlock, tryCatchEnd);
         catchesHandler.accept(catchBuilder);
         catchBuilder.finish();
+
+        return this;
+    }
+
+    sealed interface CatchFinallyBuilder permits CatchFinallyBuilderImpl {
+        CatchFinallyBuilder catching(ClassDesc exceptionType, Consumer<BlockCodeBuilder> catchHandler);
+
+        void finally_(Consumer<BlockCodeBuilder> finallyHandler);
+    }
+
+    default CodeBuilder trying2(Consumer<BlockCodeBuilder> tryHandler,
+                                Consumer<CatchFinallyBuilder> catchesHandler) {
+        CatchFinallyBuilderImpl catchBuilder = new CatchFinallyBuilderImpl();
+        catchesHandler.accept(catchBuilder);
+
+        catchBuilder.applyHandlers(this, tryHandler);
 
         return this;
     }
