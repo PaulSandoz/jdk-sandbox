@@ -15,11 +15,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.BiConsumer;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 
 public final class CatchFinallyBuilderImpl implements CodeBuilder.CatchFinallyBuilder {
     final Map<ClassDesc, Consumer<CodeBuilder.BlockCodeBuilder>> catchHandlers;
     Consumer<CodeBuilder.BlockCodeBuilder> finallyHandler;
+    BiPredicate<CodeBuilder.BlockCodeBuilder, BranchInstruction> inlineFinally;
 
     public CatchFinallyBuilderImpl() {
         this.catchHandlers = new LinkedHashMap<>();
@@ -38,13 +40,16 @@ public final class CatchFinallyBuilderImpl implements CodeBuilder.CatchFinallyBu
     }
 
     @Override
-    public void finally_(Consumer<CodeBuilder.BlockCodeBuilder> finallyHandler) {
+    public void finally_(BiPredicate<CodeBuilder.BlockCodeBuilder, BranchInstruction> inlineFinallyTest,
+                         Consumer<CodeBuilder.BlockCodeBuilder> finallyHandler) {
+        Objects.requireNonNull(inlineFinallyTest);
         Objects.requireNonNull(finallyHandler);
 
         if (this.finallyHandler != null) {
             throw new IllegalArgumentException("Existing finally handler");
         }
 
+        this.inlineFinally = inlineFinallyTest;
         this.finallyHandler = finallyHandler;
     }
 
@@ -100,18 +105,20 @@ public final class CatchFinallyBuilderImpl implements CodeBuilder.CatchFinallyBu
                 catchBlockWithFinally = null;
             }
 
+            // Declare catch/catch-all regions before the start finally block
+            // This ensures correct synchronous stack tracking
+            // Produce in same order as the java compiler
+            // Declare catch regions for try block
+            forEachRegion(tryCodeRegions,
+                    (start, end) -> b.exceptionCatch(start, end, catchBlock.startLabel(), exceptionType));
+            // Declare catch-all regions for try block
+            if (finallyBlock != null) {
+                forEachRegion(tryCodeRegions,
+                        (start, end) -> b.exceptionCatchAll(start, end, finallyBlock.startLabel()));
+            }
+
             catchBlock.start();
             {
-                // Produce in same order as the java compiler
-                // Declare catch regions for try block
-                forEachRegion(tryCodeRegions,
-                        (start, end) -> catchBlock.exceptionCatch(start, end, catchBlock.startLabel(), exceptionType));
-                // Declare catch-all regions for try block
-                if (finallyHandler != null) {
-                    forEachRegion(tryCodeRegions,
-                            (start, end) -> catchBlock.exceptionCatchAll(start, end, finallyBlock.startLabel()));
-                }
-
                 catchHandler.accept(catchBlock);
                 if (catchBlock.reachable()) {
                     catchBlock.branchInstruction(Opcode.GOTO, tryCatchEnd);
@@ -127,19 +134,22 @@ public final class CatchFinallyBuilderImpl implements CodeBuilder.CatchFinallyBu
 
         // Finally block, that throws
 
-        if (finallyHandler != null) {
+        if (finallyBlock != null) {
+            // Declare catch-all regions before the start finally block
+            // This ensures correct synchronous stack tracking
+
+            // Declare catch-all regions for try block, if no catch blocks
+            if (catchHandlers.isEmpty()) {
+                forEachRegion(tryCodeRegions,
+                        (start, end) -> b.exceptionCatchAll(start, end, finallyBlock.startLabel()));
+            }
+
+            // Declare catch-all regions for catch blocks, if any
+            forEachRegion(catchCodeRegions,
+                    (start, end) -> b.exceptionCatchAll(start, end, finallyBlock.startLabel()));
+
             finallyBlock.start();
             {
-                // Declare catch-all regions for try block, if no catch blocks
-                if (catchHandlers.isEmpty()) {
-                    forEachRegion(tryCodeRegions,
-                            (start, end) -> finallyBlock.exceptionCatchAll(start, end, finallyBlock.startLabel()));
-                }
-
-                // Declare catch-all regions for catch blocks, if any
-                forEachRegion(catchCodeRegions,
-                        (start, end) -> finallyBlock.exceptionCatchAll(start, end, finallyBlock.startLabel()));
-
                 int t = finallyBlock.allocateLocal(TypeKind.ReferenceType);
                 finallyBlock.astore(t);
                 finallyHandler.accept(finallyBlock);
@@ -185,13 +195,13 @@ public final class CatchFinallyBuilderImpl implements CodeBuilder.CatchFinallyBu
         public CodeBuilder with(CodeElement e) {
             if (isBlockExitingInstruction(e)) {
                 if (!markStartOfCodeRegion) {
+                    markStartOfCodeRegion = true;
                     // End of code region
                     codeRegions.add(parent().newBoundLabel());
                 }
 
                 inlineFinallyBlock();
 
-                markStartOfCodeRegion = true;
             } else if (markStartOfCodeRegion && !e.opcode().isPseudo()) {
                 markStartOfCodeRegion = false;
                 // Start of code region
@@ -204,9 +214,7 @@ public final class CatchFinallyBuilderImpl implements CodeBuilder.CatchFinallyBu
 
         boolean isBlockExitingInstruction(CodeElement e) {
             return switch (e) {
-                // @@@ It's hard to determine, in general, if a branch's target
-                // exits the region
-                case BranchInstruction bi -> bi.target() == breakLabel();
+                case BranchInstruction bi -> inlineFinally.test(this, bi);
                 case ReturnInstruction ri -> true;
                 default -> false;
             };

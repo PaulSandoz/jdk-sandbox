@@ -33,6 +33,7 @@ import java.lang.constant.MethodTypeDesc;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 
 import jdk.classfile.constantpool.ClassEntry;
@@ -362,7 +363,15 @@ public sealed interface CodeBuilder
     sealed interface CatchFinallyBuilder permits CatchFinallyBuilderImpl {
         CatchFinallyBuilder catching(ClassDesc exceptionType, Consumer<BlockCodeBuilder> catchHandler);
 
-        void finally_(Consumer<BlockCodeBuilder> finallyHandler);
+        default void finally_(Consumer<BlockCodeBuilder> finallyHandler) {
+            finally_(INLINE_FINALLY_ON_BREAK, finallyHandler);
+        }
+
+        void finally_(BiPredicate<BlockCodeBuilder, BranchInstruction> inlineFinallyTest,
+                      Consumer<BlockCodeBuilder> finallyHandler);
+
+        BiPredicate<BlockCodeBuilder, BranchInstruction> INLINE_FINALLY_ON_BREAK =
+                (b, i) -> b.breakLabel() == i.target();
     }
 
     default CodeBuilder trying2(Consumer<BlockCodeBuilder> tryHandler,
