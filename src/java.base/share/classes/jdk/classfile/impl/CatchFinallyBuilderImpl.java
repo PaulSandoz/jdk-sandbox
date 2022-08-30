@@ -15,20 +15,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.BiConsumer;
-import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 
 public final class CatchFinallyBuilderImpl implements CodeBuilder.CatchFinallyBuilder {
     final Map<ClassDesc, Consumer<CodeBuilder.BlockCodeBuilder>> catchHandlers;
     Consumer<CodeBuilder.BlockCodeBuilder> finallyHandler;
-    BiPredicate<CodeBuilder.BlockCodeBuilder, BranchInstruction> inlineFinally;
 
     public CatchFinallyBuilderImpl() {
         this.catchHandlers = new LinkedHashMap<>();
     }
 
     @Override
-    public CodeBuilder.CatchFinallyBuilder catching(ClassDesc exceptionType, Consumer<CodeBuilder.BlockCodeBuilder> catchHandler) {
+    public CodeBuilder.CatchFinallyBuilder catching(ClassDesc exceptionType,
+                                                    Consumer<CodeBuilder.BlockCodeBuilder> catchHandler) {
         Objects.requireNonNull(catchHandler);
         Objects.requireNonNull(exceptionType);
 
@@ -40,16 +39,13 @@ public final class CatchFinallyBuilderImpl implements CodeBuilder.CatchFinallyBu
     }
 
     @Override
-    public void finally_(BiPredicate<CodeBuilder.BlockCodeBuilder, BranchInstruction> inlineFinallyTest,
-                         Consumer<CodeBuilder.BlockCodeBuilder> finallyHandler) {
-        Objects.requireNonNull(inlineFinallyTest);
+    public void finally_(Consumer<CodeBuilder.BlockCodeBuilder> finallyHandler) {
         Objects.requireNonNull(finallyHandler);
 
         if (this.finallyHandler != null) {
             throw new IllegalArgumentException("Existing finally handler");
         }
 
-        this.inlineFinally = inlineFinallyTest;
         this.finallyHandler = finallyHandler;
     }
 
@@ -214,7 +210,11 @@ public final class CatchFinallyBuilderImpl implements CodeBuilder.CatchFinallyBu
 
         boolean isBlockExitingInstruction(CodeElement e) {
             return switch (e) {
-                case BranchInstruction bi -> inlineFinally.test(this, bi);
+                // @@@ This assumes a label that is not a member of the block's label set
+                //     branches to an ancestor block rather than to an descendant block.
+                //     We need a way to determine if a label is dead
+                //     i.e. after the end of a block, all associated labels become dead
+                case BranchInstruction bi -> !labels().contains(bi.target());
                 case ReturnInstruction ri -> true;
                 default -> false;
             };

@@ -31,7 +31,10 @@ import jdk.classfile.Opcode;
 import jdk.classfile.TypeKind;
 import jdk.classfile.instruction.LabelTarget;
 
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * BlockCodeBuilder
@@ -46,6 +49,7 @@ public sealed class BlockCodeBuilderImpl
     private boolean hasInstructions = false;
     private int topLocal;
     private int terminalMaxLocals;
+    private Set<Label> labels;
 
     public BlockCodeBuilderImpl(CodeBuilder parent, Label breakLabel) {
         super(parent);
@@ -66,6 +70,26 @@ public sealed class BlockCodeBuilderImpl
         if (terminalMaxLocals != topLocal(terminal)) {
             throw new IllegalStateException("Interference in local variable slot management");
         }
+        // @@@ make dead all labels?
+    }
+
+    Set<Label> initLabelSet() {
+        if (labels == null) {
+            labels = new HashSet<>();
+            labels.add(startLabel);
+        }
+        return labels;
+    }
+
+    @Override
+    public Label newLabel() {
+        Label l = terminal.newLabel();
+        initLabelSet().add(l);
+        return l;
+    }
+
+    public Set<Label> labels() {
+        return Collections.unmodifiableSet(initLabelSet());
     }
 
     public boolean reachable() {
@@ -91,9 +115,18 @@ public sealed class BlockCodeBuilderImpl
 
     @Override
     public CodeBuilder with(CodeElement element) {
-        Opcode op = element.opcode();
-        parent.with(element);
+        if (element instanceof LabelTarget lt) {
+            // Only labels created by the block may be bound in the block
+            if (!labels.contains(lt.label())) {
+                throw new IllegalArgumentException("Label target's label cannot be bound");
+            }
+            // Ensure label target is not processed by parent blocks
+            terminal.with(element);
+        } else {
+            parent.with(element);
+        }
 
+        Opcode op = element.opcode();
         hasInstructions |= !op.isPseudo();
 
         if (reachable) {

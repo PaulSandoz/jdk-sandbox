@@ -33,7 +33,7 @@ import java.lang.constant.MethodTypeDesc;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.BiPredicate;
+import java.util.Set;
 import java.util.function.Consumer;
 
 import jdk.classfile.constantpool.ClassEntry;
@@ -159,9 +159,26 @@ public sealed interface CodeBuilder
      */
     sealed interface BlockCodeBuilder extends CodeBuilder
             permits BlockCodeBuilderImpl {
+
+        /**
+         * {@return a fresh unbound label associated with this block.
+         * The label can only be bound to this block.}
+         * // @@@ When the block goes out of "scope" any labels become dead
+         *        and cannot be bound or used as targets
+         */
+        @Override
+        Label newLabel();
+
+        /**
+         * { @return the set of labels associated with this block.
+         * The set is unmodifiable. Newly created labels are reflected in the set.}
+         */
+        Set<Label> labels();
+
         /**
          * {@return the label locating where control is passed back to the parent block.}
-         * A branch to this label "break"'s out of the current block.
+         * A branch to this label "break"'s out of the current block. This label is not a member
+         * of this blocks set of labels.
          * <p>
          * If an instruction occurring immediately after the built block's last instruction would
          * be reachable from that last instruction, then a {@linkplain #goto_ goto} instruction
@@ -363,15 +380,7 @@ public sealed interface CodeBuilder
     sealed interface CatchFinallyBuilder permits CatchFinallyBuilderImpl {
         CatchFinallyBuilder catching(ClassDesc exceptionType, Consumer<BlockCodeBuilder> catchHandler);
 
-        default void finally_(Consumer<BlockCodeBuilder> finallyHandler) {
-            finally_(INLINE_FINALLY_ON_BREAK, finallyHandler);
-        }
-
-        void finally_(BiPredicate<BlockCodeBuilder, BranchInstruction> inlineFinallyTest,
-                      Consumer<BlockCodeBuilder> finallyHandler);
-
-        BiPredicate<BlockCodeBuilder, BranchInstruction> INLINE_FINALLY_ON_BREAK =
-                (b, i) -> b.breakLabel() == i.target();
+        void finally_(Consumer<BlockCodeBuilder> finallyHandler);
     }
 
     default CodeBuilder trying2(Consumer<BlockCodeBuilder> tryHandler,
